@@ -24,7 +24,7 @@ import java.lang.Math; //for exp, log, sqrt...they seem better than Processing's
 final String OPEN_BCI_PORT_NAME = "/dev/tty.usbmodem1431";   /************** CHANGE THIS TO MATCH THE COM PORT REPORTED ON *YOUR* COMPUTER *****************/
 
 //TESTING TRIGGER
-final boolean USE_SYNTHETIC_DATA = true; //flip this to false when using OpenBCI
+final boolean USE_SYNTHETIC_DATA = false; //flip this to false when using OpenBCI
 
 //Open BCI BOARD SETTINGS
 final int OPEN_BCI_BAUD_RATE = 115200; //baud rate from the Arduino

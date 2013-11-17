@@ -118,7 +118,7 @@ class gui_headFftMontage {
     g.position.y = int(axis_relPos[1]*float(win_y));
     //g.position.y = 0;
   
-    g.setYAxisMin(-NUM_OPEN_BCI_CHANNELS-1.0f);
+    g.setYAxisMin(-GLOBALS.NUM_OPEN_BCI_CHANNELS-1.0f);
     g.setYAxisMax(0.0f);
     g.setYAxisTickSpacing(1f);
     g.setYAxisMinorTicks(0);
@@ -193,7 +193,7 @@ class gui_headFftMontage {
     
     //set the y-offsets for each trace in the fft plot.
     //have each trace bumped down by -1.0.
-    for (int Ichan=0; Ichan < NUM_OPEN_BCI_CHANNELS; Ichan++) {
+    for (int Ichan=0; Ichan < GLOBALS.NUM_OPEN_BCI_CHANNELS; Ichan++) {
       montage_yoffsets[Ichan]=(float)(-(Ichan+1));
     }
     sTrace.setYOffset_byRef(montage_yoffsets);
@@ -216,12 +216,12 @@ class gui_headFftMontage {
   public void initDataTraces(float[] dataBuffX,float[][] dataBuffY,FFT[] fftBuff,float[] dataBuffY_std) {      
     //initialize the time-domain montage-plot traces
     sTrace = new ScatterTrace();
-    montage_yoffsets = new float[NUM_OPEN_BCI_CHANNELS];
+    montage_yoffsets = new float[GLOBALS.NUM_OPEN_BCI_CHANNELS];
     initializeMontageTraces(dataBuffX,dataBuffY);
   
     //initialize the FFT traces
     fftTrace = new ScatterTrace_FFT(fftBuff); //can't put this here...must be in setup()
-    fftYOffset = new float[NUM_OPEN_BCI_CHANNELS];
+    fftYOffset = new float[GLOBALS.NUM_OPEN_BCI_CHANNELS];
     initializeFFTTraces(fftTrace,fftBuff,fftYOffset,gFFT);
     
     //link the data to the head plot

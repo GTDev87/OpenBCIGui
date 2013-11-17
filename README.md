@@ -5,15 +5,16 @@
 
 ### Setup
 * Start project in Processing
-* Edit - in OpenBCI_GUI
+* Edit - in OpenBCIGlobals
 
 
         final String OPEN_BCI_PORT_NAME = "/dev/tty.usbmodem1431";  /************** CHANGE THIS TO MATCH THE COM PORT REPORTED ON *YOUR* COMPUTER *****************/ 
 
 
 ### Testing
+* In OpenBCIGlobals
 
-    final boolean USE_SYNTHETIC_DATA = true;
+        final boolean USE_SYNTHETIC_DATA = true;
 
 ### Data
 * Raw data gets sent to /rawdata

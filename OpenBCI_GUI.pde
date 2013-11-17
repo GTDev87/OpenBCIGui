@@ -19,45 +19,17 @@ import java.util.*; //for Array.copyOfRange()
 import java.lang.Math; //for exp, log, sqrt...they seem better than Processing's built-in
 //import processing.core.PApplet;
 
-//CONSTANTS
-//Serial communications constants
-final String OPEN_BCI_PORT_NAME = "/dev/tty.usbmodem1431";   /************** CHANGE THIS TO MATCH THE COM PORT REPORTED ON *YOUR* COMPUTER *****************/
-
-//TESTING TRIGGER
-final boolean USE_SYNTHETIC_DATA = false; //flip this to false when using OpenBCI
-
-//Open BCI BOARD SETTINGS
-final int OPEN_BCI_BAUD_RATE = 115200; //baud rate from the Arduino
-final int NUM_OPEN_BCI_CHANNELS = 8; //normal OpenBCI has 8 channels
-//use this for when daisy-chaining two OpenBCI boards
-//int OPEN_BCI_BAUD_RATE = 2*115200; //baud rate from the Arduino
-//int NUM_OPEN_BCI_CHANNELS = 16; //daisy chain has 16 channels
-
-//DATA CONSTANTS
-final float FS_HERTZ = 250f;
-final int nDataBackBuff = (int)FS_HERTZ;
-final float SCALE_FACTOR_U_VOLTS_PER_COUNT = (4.5f / 24.0f / pow(2, 24)) * 1000000.f * 2.0f; //factor of 2 added 2013-11-10 to match empirical tests in my office on Friday
-final int NUMBER_OF_POINTS_PER_UPDATE = 30;
-
-//fft constants
-final int Nfft = 256; //set resolution of the FFT.  Use N=256 for normal, N=512 for MU waves
-final float fft_smooth_fac = 0.75f; //use value between [0 and 1].  Bigger is more smoothing.  Use 0.9 for MU waves, 0.75 for Alpha, 0.0 for no smoothing
-
-//plotting constants
-final float vertScale_uV = 100.0f;
-final float displayTime_sec = 5f;
-final float dataBuff_len_sec = displayTime_sec+2f;
-
-//END OF CONSTANTS
-
-
 openBCI_ADS1299 _openBCI;
 
-float yLittleBuff[] = new float[NUMBER_OF_POINTS_PER_UPDATE];
+OpenBCIGlobals GLOBALS = new OpenBCIGlobals();
 
-//filter constants
-float yLittleBuff_uV[][] = new float[NUM_OPEN_BCI_CHANNELS][NUMBER_OF_POINTS_PER_UPDATE];
-float filtState[] = new float[NUM_OPEN_BCI_CHANNELS];
+float yLittleBuff[] = new float[GLOBALS.NUMBER_OF_POINTS_PER_UPDATE];
+
+
+Channel channels[] = new Channel[GLOBALS.NUM_OPEN_BCI_CHANNELS];
+FFT fftBuff[] = new FFT[GLOBALS.NUM_OPEN_BCI_CHANNELS];   //from the minim library
+float yLittleBuff_uV[][] = new float[GLOBALS.NUM_OPEN_BCI_CHANNELS][GLOBALS.NUMBER_OF_POINTS_PER_UPDATE];
+
 
 float dataBuffX[];
 float dataBuffY_uV[][]; //2D array to handle multiple data channels, each row is a new channel so that dataBuffY[3][] is channel 4
@@ -74,15 +46,7 @@ filterConstants filtCoeff_notch =  new filterConstants(b2,a2,"Notch 1-50Hz");
 
 
 
-
-FFT fftBuff[] = new FFT[NUM_OPEN_BCI_CHANNELS];   //from the minim library
-
-
 gui_headFftMontage gui;
-
-
-
-
 
 boolean isRunning=false;
 int openBCI_byteCount = 0;
@@ -97,7 +61,7 @@ String output_fname;
 
 //openBCI data packet
 
-dataPacket_ADS1299 dataPacketBuff[] = new dataPacket_ADS1299[nDataBackBuff]; //allocate the array, but doesn't call constructor.  Still need to call the constructor!
+dataPacket_ADS1299 dataPacketBuff[] = new dataPacket_ADS1299[GLOBALS.SIZE_DATA_BACK_BUFFER]; //allocate the array, but doesn't call constructor.  Still need to call the constructor!
 int curDataPacketInd = -1;
 int lastReadDataPacketInd = -1;
 
@@ -113,12 +77,13 @@ void appendAndShift(float[] data, float[] newData) {
 }
 
 
-void prepareData(float[] dataBuffX, float[][] dataBuffY_uV, float hertz) {
+void prepareData(float[] dataBuffX, float[][] dataBuffY_uV) {
   //initialize the x and y data
+
   int xoffset = dataBuffX.length - 1;
   for (int i=0; i < dataBuffX.length; i++) {
-    dataBuffX[i] = ((float)(i-xoffset)) / hertz; //x data goes from minus time up to zero
-    for (int Ichan = 0; Ichan < NUM_OPEN_BCI_CHANNELS; Ichan++) { 
+    dataBuffX[i] = ((float)(i-xoffset)) / GLOBALS.FS_HERTZ; //x data goes from minus time up to zero
+    for (int Ichan = 0; Ichan < GLOBALS.NUM_OPEN_BCI_CHANNELS; Ichan++) { 
       dataBuffY_uV[Ichan][i] = 0f;  //make the y data all zeros
     }
   }
@@ -127,14 +92,14 @@ void prepareData(float[] dataBuffX, float[][] dataBuffY_uV, float hertz) {
 void initializeFFTObjects(FFT[] fftBuff, float[][] dataBuffY_uV, int N, float FS_HERTZ) {
 
   float[] fooData;
-  for (int Ichan=0; Ichan < NUM_OPEN_BCI_CHANNELS; Ichan++) {
+  for (int Ichan=0; Ichan < GLOBALS.NUM_OPEN_BCI_CHANNELS; Ichan++) {
     //make the FFT objects...Following "SoundSpectrum" example that came with the Minim library
-    //fftBuff[Ichan] = new FFT(Nfft, FS_HERTZ);  //I can't have this here...it must be in setup
+    //fftBuff[Ichan] = new FFT(FFT_RESOLUTION, FS_HERTZ);  //I can't have this here...it must be in setup
     fftBuff[Ichan].window(FFT.HAMMING);
 
     //do the FFT on the initial data
     fooData = dataBuffY_uV[Ichan];
-    fooData = Arrays.copyOfRange(fooData, fooData.length-Nfft, fooData.length); 
+    fooData = Arrays.copyOfRange(fooData, fooData.length - GLOBALS.FFT_RESOLUTION, fooData.length); 
     fftBuff[Ichan].forward(fooData); //compute FFT on this channel of data
   }
 }
@@ -151,43 +116,43 @@ void setup() {
   //if (frame != null) frame.setResizable(true);  //make window resizable
 
   //prepare data variables
-  dataBuffX = new float[(int)(dataBuff_len_sec * FS_HERTZ)];
-  dataBuffY_uV = new float[NUM_OPEN_BCI_CHANNELS][dataBuffX.length];
-  dataBuffY_filtY_uV = new float[NUM_OPEN_BCI_CHANNELS][dataBuffX.length];
-  data_std_uV = new float[NUM_OPEN_BCI_CHANNELS];
-  for (int i=0; i<nDataBackBuff;i++) { 
-    dataPacketBuff[i] = new dataPacket_ADS1299(NUM_OPEN_BCI_CHANNELS);
+  dataBuffX = new float[(int)(GLOBALS.DATA_BUFFER_LENGTH_SECONDS * GLOBALS.FS_HERTZ)];
+  dataBuffY_uV = new float[GLOBALS.NUM_OPEN_BCI_CHANNELS][dataBuffX.length];
+  dataBuffY_filtY_uV = new float[GLOBALS.NUM_OPEN_BCI_CHANNELS][dataBuffX.length];
+  data_std_uV = new float[GLOBALS.NUM_OPEN_BCI_CHANNELS];
+  for (int i=0; i < GLOBALS.SIZE_DATA_BACK_BUFFER;i++) { 
+    dataPacketBuff[i] = new dataPacket_ADS1299(GLOBALS.NUM_OPEN_BCI_CHANNELS);
   }
 
 
   //initialize the data
-  prepareData(dataBuffX, dataBuffY_uV, FS_HERTZ);
+  prepareData(dataBuffX, dataBuffY_uV);
 
   //initialize the FFT objects
-  for (int Ichan=0; Ichan < NUM_OPEN_BCI_CHANNELS; Ichan++) { 
-    fftBuff[Ichan] = new FFT(Nfft, FS_HERTZ);
+  for (int Ichan=0; Ichan < GLOBALS.NUM_OPEN_BCI_CHANNELS; Ichan++) { 
+    fftBuff[Ichan] = new FFT(GLOBALS.FFT_RESOLUTION, GLOBALS.FS_HERTZ);
   };  //make the FFT objects
-  initializeFFTObjects(fftBuff, dataBuffY_uV, Nfft, FS_HERTZ);
+  initializeFFTObjects(fftBuff, dataBuffY_uV, GLOBALS.FFT_RESOLUTION, GLOBALS.FS_HERTZ);
 
   //initilize the GUI
-  gui = new gui_headFftMontage(this, win_x, win_y, NUM_OPEN_BCI_CHANNELS, displayTime_sec,vertScale_uV);
+  gui = new gui_headFftMontage(this, win_x, win_y, GLOBALS.NUM_OPEN_BCI_CHANNELS, GLOBALS.DISPLAY_TIME_IN_SECONDS, GLOBALS.VERTICAL_SCALE);
 
   //associate the data to the GUI traces
   gui.initDataTraces(dataBuffX, dataBuffY_filtY_uV, fftBuff, data_std_uV);
 
   //open the data filte for writing
-  fileRawOutput.writeRawText(FS_HERTZ);
+  fileRawOutput.writeRawText(GLOBALS.FS_HERTZ);
   output_fname = fileRawOutput._fname;
   println("openBCI: opened output file: " + output_fname);
 
   // Open the serial port to the Arduino that has the OpenBCI
-  if (!USE_SYNTHETIC_DATA) {
+  if (!GLOBALS.USE_SYNTHETIC_DATA) {
     if (true) {
       println(Serial.list());
       //OPEN_BCI_PORT_NAME = Serial.list()[0]; //change this for your computer!
     }
-    println("Opening Serial " + OPEN_BCI_PORT_NAME);
-    _openBCI = new openBCI_ADS1299(this, OPEN_BCI_PORT_NAME, OPEN_BCI_BAUD_RATE, NUM_OPEN_BCI_CHANNELS); //this also starts the data transfer after XX seconds
+    println("Opening Serial " + GLOBALS.OPEN_BCI_PORT_NAME);
+    _openBCI = new openBCI_ADS1299(this, GLOBALS.OPEN_BCI_PORT_NAME, GLOBALS.OPEN_BCI_BAUD_RATE, GLOBALS.NUM_OPEN_BCI_CHANNELS); //this also starts the data transfer after XX seconds
   }
 
   //start
@@ -204,17 +169,17 @@ int byteRate_perSec = 0;
 void draw() {
   //newData = false;
   if (isRunning) {
-    if (USE_SYNTHETIC_DATA) {  //use synthetic data (for GUI debugging) or use real data from the Serial stream
+    if (GLOBALS.USE_SYNTHETIC_DATA) {  //use synthetic data (for GUI debugging) or use real data from the Serial stream
       lastReadDataPacketInd = 0;
-      for (int i = 0; i < NUMBER_OF_POINTS_PER_UPDATE; i++) {
+      for (int i = 0; i < GLOBALS.NUMBER_OF_POINTS_PER_UPDATE; i++) {
         //synthesize data
         dataPacketBuff[lastReadDataPacketInd].sampleIndex++;
-        synthesizeData(NUM_OPEN_BCI_CHANNELS, FS_HERTZ, SCALE_FACTOR_U_VOLTS_PER_COUNT, dataPacketBuff[lastReadDataPacketInd]);
+        synthesizeData(dataPacketBuff[lastReadDataPacketInd]);
 
         //gather the data into the "little buffer"
-        for (int Ichan=0; Ichan < NUM_OPEN_BCI_CHANNELS; Ichan++) {
+        for (int Ichan=0; Ichan < GLOBALS.NUM_OPEN_BCI_CHANNELS; Ichan++) {
           //scale the data into engineering units..."microvolts"
-          yLittleBuff_uV[Ichan][pointCounter] = dataPacketBuff[lastReadDataPacketInd].values[Ichan]* SCALE_FACTOR_U_VOLTS_PER_COUNT;
+          yLittleBuff_uV[Ichan][pointCounter] = dataPacketBuff[lastReadDataPacketInd].values[Ichan] * GLOBALS.SCALE_FACTOR_U_VOLTS_PER_COUNT;
         }
         pointCounter++;
       }
@@ -224,11 +189,11 @@ void draw() {
       //is data waiting in the buffer from the serial port?
       if (curDataPacketInd != lastReadDataPacketInd) {
         //gather the data into the "little buffer"
-        while ( (curDataPacketInd != lastReadDataPacketInd) && (pointCounter < NUMBER_OF_POINTS_PER_UPDATE)) {
+        while ( (curDataPacketInd != lastReadDataPacketInd) && (pointCounter < GLOBALS.NUMBER_OF_POINTS_PER_UPDATE)) {
           lastReadDataPacketInd = (lastReadDataPacketInd+1) % dataPacketBuff.length;
-          for (int Ichan=0; Ichan < NUM_OPEN_BCI_CHANNELS; Ichan++) {
+          for (int Ichan=0; Ichan < GLOBALS.NUM_OPEN_BCI_CHANNELS; Ichan++) {
             //scale the data into engineering units..."microvolts"
-            yLittleBuff_uV[Ichan][pointCounter] = dataPacketBuff[lastReadDataPacketInd].values[Ichan]* SCALE_FACTOR_U_VOLTS_PER_COUNT;
+            yLittleBuff_uV[Ichan][pointCounter] = dataPacketBuff[lastReadDataPacketInd].values[Ichan] * GLOBALS.SCALE_FACTOR_U_VOLTS_PER_COUNT;
           } 
           pointCounter++;
         }
@@ -236,8 +201,8 @@ void draw() {
     }
 
     //has enough data arrived to process it and update the GUI?
-    //println("pointCounter " + pointCounter + ", NUMBER_OF_POINTS_PER_UPDATE " + NUMBER_OF_POINTS_PER_UPDATE);
-    if (pointCounter >= NUMBER_OF_POINTS_PER_UPDATE) {
+    //println("pointCounter " + pointCounter + ", GLOBALS.NUMBER_OF_POINTS_PER_UPDATE " + GLOBALS.NUMBER_OF_POINTS_PER_UPDATE);
+    if (pointCounter >= GLOBALS.NUMBER_OF_POINTS_PER_UPDATE) {
       pointCounter = 0;  //reset for next time
       byteRate_perSec = (int)(1000.f * ((float)(openBCI_byteCount - prevBytes)) / ((float)(millis() - prevMillis)));
       prevBytes = openBCI_byteCount; 
@@ -245,11 +210,11 @@ void draw() {
       float foo_val;
       float prevFFTdata[] = new float[fftBuff[0].specSize()];
       
-      double fooVals[][] = new double[fftBuff[0].specSize()][NUM_OPEN_BCI_CHANNELS];
+      double fooVals[][] = new double[fftBuff[0].specSize()][GLOBALS.NUM_OPEN_BCI_CHANNELS];
       
       double bandWidth = fftBuff[0].getBandWidth();
       
-      for (int Ichan=0;Ichan < NUM_OPEN_BCI_CHANNELS; Ichan++) {
+      for (int Ichan=0;Ichan < GLOBALS.NUM_OPEN_BCI_CHANNELS; Ichan++) {
         
         //append data to larger buffer
         appendAndShift(dataBuffY_uV[Ichan], yLittleBuff_uV[Ichan]);
@@ -262,7 +227,7 @@ void draw() {
         //update the FFT stuff
         for (int I=0; I < fftBuff[Ichan].specSize(); I++) prevFFTdata[I] = fftBuff[Ichan].getBand(I); //copy the old spectrum values
         float[] fooData_raw = dataBuffY_uV[Ichan];  //use the raw data
-        fooData_raw = Arrays.copyOfRange(fooData_raw, fooData_raw.length-Nfft, fooData_raw.length);   //just grab the most recent block of data
+        fooData_raw = Arrays.copyOfRange(fooData_raw, fooData_raw.length - GLOBALS.FFT_RESOLUTION, fooData_raw.length);   //just grab the most recent block of data
         fftBuff[Ichan].forward(fooData_raw); //compute FFT on this channel of data
         
         //average the FFT with previous FFT data
@@ -274,8 +239,8 @@ void draw() {
           if (prevFFTdata[I] < min_val) prevFFTdata[I] = (float)min_val; //make sure we're not too small for the log calls
           foo = fftBuff[Ichan].getBand(I); if (foo < min_val) foo = min_val; //make sure this value isn't too small
           fooVals[I][Ichan] = foo;
-          foo =   (1.0d-fft_smooth_fac) * java.lang.Math.log(java.lang.Math.pow(foo,2));
-          foo += fft_smooth_fac * java.lang.Math.log(java.lang.Math.pow((double)prevFFTdata[I],2)); 
+          foo =   (1.0d - GLOBALS.FFT_SMOOTHING_FACTOR) * java.lang.Math.log(java.lang.Math.pow(foo,2));
+          foo += GLOBALS.FFT_SMOOTHING_FACTOR * java.lang.Math.log(java.lang.Math.pow((double)prevFFTdata[I],2)); 
           foo_val = (float)java.lang.Math.sqrt(java.lang.Math.exp(foo)); //average in dB space
           fftBuff[Ichan].setBand(I,foo_val);
           
@@ -283,7 +248,7 @@ void draw() {
     
         //compute the stddev for the head plot
         float[] fooData_filt = dataBuffY_filtY_uV[Ichan];  //use the filtered data
-        fooData_filt = Arrays.copyOfRange(fooData_filt, fooData_filt.length-Nfft, fooData_filt.length);   //just grab the most recent block of data
+        fooData_filt = Arrays.copyOfRange(fooData_filt, fooData_filt.length - GLOBALS.FFT_RESOLUTION, fooData_filt.length);   //just grab the most recent block of data
         data_std_uV[Ichan]=std(fooData_filt);
       }
       
@@ -433,22 +398,22 @@ void stopButtonWasPressed() {
   }
 }
 
-void synthesizeData(int NUM_OPEN_BCI_CHANNELS, float FS_HERTZ, float SCALE_FACTOR_U_VOLTS_PER_COUNT, dataPacket_ADS1299 curDataPacket) {
+void synthesizeData(dataPacket_ADS1299 curDataPacket) {
   float val_uV;
-  for (int Ichan=0; Ichan < NUM_OPEN_BCI_CHANNELS; Ichan++) {
+  for (int Ichan=0; Ichan < GLOBALS.NUM_OPEN_BCI_CHANNELS; Ichan++) {
     if (gui.chanButtons[Ichan].isActive()==false) { //an INACTIVE button has not been pressed, which means that the channel itself is ACTIVE
-      val_uV = randomGaussian()*sqrt(FS_HERTZ/2.0f); // ensures that it has amplitude of one unit per sqrt(Hz) of signal bandwidth
+      val_uV = randomGaussian() * sqrt(GLOBALS.FS_HERTZ/2.0f); // ensures that it has amplitude of one unit per sqrt(Hz) of signal bandwidth
       //val_uV = random(1)*sqrt(FS_HERTZ/2.0f); // ensures that it has amplitude of one unit per sqrt(Hz) of signal bandwidth
       if (Ichan==0) val_uV*= 10f;  //scale one channel higher
     } 
     else {
       val_uV = 0.0f;
     }
-    curDataPacket.values[Ichan] = (int) (0.5f+ val_uV / SCALE_FACTOR_U_VOLTS_PER_COUNT); //convert to counts, the 0.5 is to ensure rounding
+    curDataPacket.values[Ichan] = (int) (0.5f+ val_uV / GLOBALS.SCALE_FACTOR_U_VOLTS_PER_COUNT); //convert to counts, the 0.5 is to ensure rounding
   }
 }
 
-//toggleChannelState: : Ichan is [0 NUM_OPEN_BCI_CHANNELS-1]
+//toggleChannelState: : Ichan is [0 GLOBALS.NUM_OPEN_BCI_CHANNELS-1]
 void toggleChannelState(int Ichan) {
   if ((Ichan >= 0) && (Ichan < gui.chanButtons.length)) {
     if (gui.chanButtons[Ichan].isActive()) { //button is pressed, which means the channel was NOT active
@@ -462,7 +427,7 @@ void toggleChannelState(int Ichan) {
   }
 }
 
-//activateChannel: Ichan is [0 NUM_OPEN_BCI_CHANNELS-1]
+//activateChannel: Ichan is [0 GLOBALS.NUM_OPEN_BCI_CHANNELS-1]
 void activateChannel(int Ichan) {
   println("OpenBCI_GUI: activating channel " + (Ichan+1));
   if (_openBCI != null) _openBCI.changeChannelState(Ichan, true); //activate

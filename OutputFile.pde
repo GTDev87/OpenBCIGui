@@ -44,7 +44,7 @@ class OutputFile_rawtxt {
     String fftLine = "";
     int freqeuncyIt = 0;
     for(double[] channels : fftVals){
-           fftLine += ("(" + (freqeuncyIt * bandWidth) + "),");
+           fftLine += ("(" + (freqeuncyIt * 1/bandWidth) + "),");
       for(double channelFreqVal : channels){
         fftLine += (channelFreqVal + ",");
       }

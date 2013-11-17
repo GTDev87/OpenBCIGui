@@ -19,27 +19,39 @@ import java.util.*; //for Array.copyOfRange()
 import java.lang.Math; //for exp, log, sqrt...they seem better than Processing's built-in
 //import processing.core.PApplet;
 
-boolean _useSyntheticData = false; //flip this to false when using OpenBCI
-
+//CONSTANTS
 //Serial communications constants
-openBCI_ADS1299 _openBCI;
-String OPEN_BCI_PORT_NAME = "/dev/tty.usbmodem1431";   /************** CHANGE THIS TO MATCH THE COM PORT REPORTED ON *YOUR* COMPUTER *****************/
+final String OPEN_BCI_PORT_NAME = "/dev/tty.usbmodem1431";   /************** CHANGE THIS TO MATCH THE COM PORT REPORTED ON *YOUR* COMPUTER *****************/
 
-//these settings are for a single OpenBCI board
+//TESTING TRIGGER
+final boolean USE_SYNTHETIC_DATA = true; //flip this to false when using OpenBCI
+
+//Open BCI BOARD SETTINGS
 final int OPEN_BCI_BAUD_RATE = 115200; //baud rate from the Arduino
 final int NUM_OPEN_BCI_CHANNELS = 8; //normal OpenBCI has 8 channels
 //use this for when daisy-chaining two OpenBCI boards
 //int OPEN_BCI_BAUD_RATE = 2*115200; //baud rate from the Arduino
 //int NUM_OPEN_BCI_CHANNELS = 16; //daisy chain has 16 channels
 
-
-//data constants
+//DATA CONSTANTS
 final float FS_HERTZ = 250f;
-
-float SCALE_FACTOR_U_VOLTS_PER_COUNT = (4.5f / 24.0f / pow(2, 24)) * 1000000.f * 2.0f; //factor of 2 added 2013-11-10 to match empirical tests in my office on Friday
-
-
+final int nDataBackBuff = (int)FS_HERTZ;
+final float SCALE_FACTOR_U_VOLTS_PER_COUNT = (4.5f / 24.0f / pow(2, 24)) * 1000000.f * 2.0f; //factor of 2 added 2013-11-10 to match empirical tests in my office on Friday
 final int NUMBER_OF_POINTS_PER_UPDATE = 30;
+
+//fft constants
+final int Nfft = 256; //set resolution of the FFT.  Use N=256 for normal, N=512 for MU waves
+final float fft_smooth_fac = 0.75f; //use value between [0 and 1].  Bigger is more smoothing.  Use 0.9 for MU waves, 0.75 for Alpha, 0.0 for no smoothing
+
+//plotting constants
+final float vertScale_uV = 100.0f;
+final float displayTime_sec = 5f;
+final float dataBuff_len_sec = displayTime_sec+2f;
+
+//END OF CONSTANTS
+
+
+openBCI_ADS1299 _openBCI;
 
 float yLittleBuff[] = new float[NUMBER_OF_POINTS_PER_UPDATE];
 
@@ -62,18 +74,16 @@ filterConstants filtCoeff_notch =  new filterConstants(b2,a2,"Notch 1-50Hz");
 
 
 
-//fft constants
-int Nfft = 256; //set resolution of the FFT.  Use N=256 for normal, N=512 for MU waves
-float fft_smooth_fac = 0.75f; //use value between [0 and 1].  Bigger is more smoothing.  Use 0.9 for MU waves, 0.75 for Alpha, 0.0 for no smoothing
+
 FFT fftBuff[] = new FFT[NUM_OPEN_BCI_CHANNELS];   //from the minim library
 
-//plotting constants
-gui_headFftMontage gui;
-float vertScale_uV = 100.0f;
-float displayTime_sec = 5f;
-float dataBuff_len_sec = displayTime_sec+2f;
 
-//program constants
+gui_headFftMontage gui;
+
+
+
+
+
 boolean isRunning=false;
 int openBCI_byteCount = 0;
 int inByte = -1;    // Incoming serial data
@@ -86,7 +96,7 @@ OutputFile_rawtxt fileFftOutput = new OutputFile_rawtxt("fftdata/openBCI_fft_");
 String output_fname;
 
 //openBCI data packet
-final int nDataBackBuff = (int)FS_HERTZ;
+
 dataPacket_ADS1299 dataPacketBuff[] = new dataPacket_ADS1299[nDataBackBuff]; //allocate the array, but doesn't call constructor.  Still need to call the constructor!
 int curDataPacketInd = -1;
 int lastReadDataPacketInd = -1;
@@ -171,7 +181,7 @@ void setup() {
   println("openBCI: opened output file: " + output_fname);
 
   // Open the serial port to the Arduino that has the OpenBCI
-  if (_useSyntheticData == false) {
+  if (!USE_SYNTHETIC_DATA) {
     if (true) {
       println(Serial.list());
       //OPEN_BCI_PORT_NAME = Serial.list()[0]; //change this for your computer!
@@ -194,7 +204,7 @@ int byteRate_perSec = 0;
 void draw() {
   //newData = false;
   if (isRunning) {
-    if (_useSyntheticData) {  //use synthetic data (for GUI debugging) or use real data from the Serial stream
+    if (USE_SYNTHETIC_DATA) {  //use synthetic data (for GUI debugging) or use real data from the Serial stream
       lastReadDataPacketInd = 0;
       for (int i = 0; i < NUMBER_OF_POINTS_PER_UPDATE; i++) {
         //synthesize data
@@ -208,8 +218,7 @@ void draw() {
         }
         pointCounter++;
       }
-    } 
-    else {
+    } else {
       _openBCI.updateState();
 
       //is data waiting in the buffer from the serial port?
